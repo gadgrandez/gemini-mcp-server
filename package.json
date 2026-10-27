@@ -1,39 +1,55 @@
 {
-  "name": "@salviz/gemini-mcp-server",
-  "version": "2.0.0",
-  "description": "MCP server with 23 tools for Google Gemini API — chat, multimodal analysis, deep research, YouTube, Files API, embeddings, and more",
+  "name": "@gadgrandez/gemini-mcp-server",
+  "version": "3.0.0",
+  "description": "MCP server that lets Claude and other MCP clients watch video, listen to audio and read documents through the Gemini API",
   "main": "index.js",
   "type": "module",
   "bin": {
     "gemini-mcp-server": "./index.js"
   },
+  "files": [
+    "index.js",
+    "lib/",
+    "tools/"
+  ],
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test test/server.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "keywords": [
     "mcp",
     "mcp-server",
     "gemini",
     "google-gemini",
-    "ai",
-    "llm",
     "model-context-protocol",
-    "deep-research",
-    "multimodal"
+    "video-understanding",
+    "audio-understanding",
+    "transcription",
+    "multimodal",
+    "claude"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/salviz/gemini-mcp-server.git"
+    "url": "git+https://github.com/gadgrandez/gemini-mcp-server.git"
   },
-  "author": "salviz",
+  "author": "Gad Grandez",
+  "contributors": [
+    "salviz (original project)"
+  ],
   "license": "MIT",
-  "homepage": "https://github.com/salviz/gemini-mcp-server",
+  "homepage": "https://github.com/gadgrandez/gemini-mcp-server",
+  "bugs": {
+    "url": "https://github.com/gadgrandez/gemini-mcp-server/issues"
+  },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "@google/genai": "^1.0.0",
-    "zod": "^3.24.0"
+    "@google/genai": "^2.31.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
   }
 }

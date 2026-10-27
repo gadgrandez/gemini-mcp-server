@@ -1,50 +1,70 @@
 # Gemini MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server providing **23 tools** for Google's Gemini API -- chat, multimodal analysis, deep research, file management, YouTube analysis, and more.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, or any MCP client, the ability to watch video, listen to audio and read documents through the Gemini API. The client sends a file or URL and a question; Gemini processes the media and returns text the client can keep working with.
 
-Built with [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK (v1.0.0+).
+Built on the [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK and the Gemini Interactions API. Fork of [salviz/gemini-mcp-server](https://github.com/salviz/gemini-mcp-server).
 
-## Features
+## Tools
 
-- Chat with Gemini models (single-turn, multi-turn, with tool modes)
-- Analyze images, audio, video, PDFs, YouTube videos, and URLs
-- Files API with auto-switching: inline for small files (<20MB), upload for large (up to 2GB)
-- Deep research agent with background polling and push notifications (Termux)
-- Structured JSON output, embeddings, code execution, translation, summarization
-- Google Search grounding and URL context
-- Thinking mode enabled by default (budget: 65535 tokens)
-- High media resolution by default
+| Tool | Purpose |
+| --- | --- |
+| `gemini_analyze_video` | Watch a video (frames and soundtrack) and answer a question. Local file, Files API name, https/gs URL or public YouTube URL. |
+| `gemini_analyze_audio` | Listen to audio and answer a question: summary, speakers, tone, music, sound events, moments by `MM:SS`. |
+| `gemini_transcribe_audio` | Transcript from the dedicated transcription model, with speaker labels and `MM:SS` timestamps. |
+| `gemini_analyze_image` | Ask about an image, up to `ultra_high` resolution for dense text and small details. |
+| `gemini_analyze_document` | Ask about a PDF or CSV, including scanned pages and figures. |
+| `gemini_upload_file` | Upload a file once and reuse its `files/...` name across several questions. |
+| `gemini_list_files` | List files stored in the Files API. |
+| `gemini_delete_file` | Delete a file from the Files API. |
 
-## Prerequisites
+### Sources
 
-- **Node.js 18+**
-- A [Gemini API key](https://aistudio.google.com/apikey)
+Every analysis tool takes a `source`:
 
-## Quick Install
+- An absolute local path. Files up to 20 MB are sent inline; larger files are uploaded to the Files API, used, and deleted afterwards.
+- A Files API name such as `files/abc123`, returned by `gemini_upload_file`.
+- An `https://` URL or a `gs://` URI.
+- A public YouTube URL (video only).
+
+Supported formats: MP4, MPEG, MOV, AVI, FLV, WebM, WMV and 3GP for video; WAV, MP3, AIFF, AAC, OGG, FLAC, M4A, Opus and WebM for audio; PNG, JPEG, WebP, HEIC, HEIF, GIF, BMP and TIFF for images; PDF and CSV for documents. Other containers, such as MKV, need conversion first (`ffmpeg -i in.mkv -c copy out.mp4`).
+
+### Video processing
+
+`gemini_analyze_video` uses agentic processing by default: the model navigates the timeline and loads transcript, frames or audio segments as it needs them, which uses far fewer tokens on long videos. Static processing samples frames at a fixed rate and is selected automatically when `startOffset`, `endOffset` or `fps` are set.
+
+### Transcription
+
+`gemini_transcribe_audio` labels speakers and adds timestamps by default. With either option enabled, audio is limited to 30 minutes; with both disabled, the limit is 1 hour. `customVocabulary` and `smart` mode require both options disabled.
+
+## Requirements
+
+- Node.js 20 or later (24 LTS recommended)
+- A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
+
+## Installation
 
 ```bash
-git clone https://github.com/salviz/gemini-mcp-server.git
+git clone https://github.com/gadgrandez/gemini-mcp-server.git
 cd gemini-mcp-server
-npm install
+npm ci
+npm test
 ```
 
-### Register with Claude Code
+### Claude Desktop
 
-CLI:
+From the Claude menu in the system menu bar, open **Settings…**, go to the **Developer** tab and click **Edit Config**. The file lives at:
 
-```bash
-claude mcp add gemini -- node /path/to/gemini-mcp-server/index.js
-```
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-Or add to your MCP config (`~/.claude/claude_desktop_config.json` or `.mcp.json`):
+Add the server under `mcpServers`, using the absolute path to `node` (`which node` on macOS, `where node` on Windows) and to `index.js`:
 
 ```json
 {
   "mcpServers": {
     "gemini": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/gemini-mcp-server/index.js"],
+      "command": "/opt/homebrew/bin/node",
+      "args": ["/Users/you/gemini-mcp-server/index.js"],
       "env": {
         "GEMINI_API_KEY": "your-api-key"
       }
@@ -53,123 +73,46 @@ Or add to your MCP config (`~/.claude/claude_desktop_config.json` or `.mcp.json`
 }
 ```
 
-## Environment Variables
+Quit Claude Desktop completely and open it again. To confirm the server loaded, click **Add files, connectors, and more** in the message box, open **Connectors → Manage connectors** and select **gemini**.
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GEMINI_API_KEY` | Yes | Your Google Gemini API key |
+If it does not appear, the server's stderr is in `~/Library/Logs/Claude/mcp-server-gemini.log` on macOS and `%APPDATA%\Claude\logs\mcp-server-gemini.log` on Windows.
 
-## Tools (23)
+### Claude Code
 
-### Chat & Generation (6)
-
-| Tool | Description |
-|------|-------------|
-| `gemini_chat` | Send a prompt with optional search grounding and URL context |
-| `gemini_chat_multi` | Multi-turn conversation with message history |
-| `gemini_chat_with_tools` | Chat with mode switching: `search`, `code`, or `all` |
-| `gemini_search_grounded` | Search-grounded generation with source citations |
-| `gemini_structured_output` | Generate JSON output matching a provided schema |
-| `gemini_url_context` | Analyze one or more URLs using Gemini's URL context tool |
-
-### Multimodal Analysis (6)
-
-| Tool | Description |
-|------|-------------|
-| `gemini_analyze_image` | Analyze an image file with Gemini Vision (JPG, PNG, GIF, WebP, BMP, SVG) |
-| `gemini_analyze_audio` | Transcribe, summarize, or describe audio (MP3, WAV, OGG, FLAC, AAC, M4A, Opus) |
-| `gemini_analyze_video` | Analyze a video file; auto-uploads large files via Files API (MP4, AVI, MOV, MKV, WebM) |
-| `gemini_analyze_pdf` | Analyze a PDF document (up to 2GB via Files API) |
-| `gemini_analyze_youtube` | Analyze a public YouTube video by URL (no download needed) |
-| `gemini_analyze_url` | Analyze content from an HTTP/HTTPS URL or GCS URI (`gs://`) |
-
-### Deep Research (2)
-
-| Tool | Description |
-|------|-------------|
-| `gemini_deep_research` | Start a deep research task; sends push notification on completion |
-| `gemini_check_research` | Check status of a running deep research task by interaction ID |
-
-### Files API (3)
-
-| Tool | Description |
-|------|-------------|
-| `gemini_upload_file` | Upload a file to Gemini (up to 2GB, retained 48 hours) |
-| `gemini_list_files` | List all uploaded files with metadata |
-| `gemini_delete_file` | Delete an uploaded file by name |
-
-### Utilities (6)
-
-| Tool | Description |
-|------|-------------|
-| `gemini_list_models` | List available Gemini models with capabilities and token limits |
-| `gemini_count_tokens` | Count tokens in text using a model's tokenizer |
-| `gemini_embed` | Generate text embeddings (default: `gemini-embedding-001`, 3072 dimensions) |
-| `gemini_code_execute` | Execute Python code via Gemini's built-in sandbox |
-| `gemini_summarize` | Summarize text with configurable style (brief, detailed, bullet-points) |
-| `gemini_translate` | Translate text to any language with optional model override |
-
-## Model Selection
-
-Default model: **`gemini-3.1-pro-preview`**. Every tool accepts an optional `model` parameter.
-
-| Model | Best For |
-|-------|----------|
-| `gemini-3.1-pro-preview` | Default. Best quality for most tasks |
-| `gemini-2.5-flash` | Faster responses, lower cost |
-| `gemini-embedding-001` | Text embeddings (used by `gemini_embed`) |
-| `deep-research-pro-preview-12-2025` | Deep research agent (used internally) |
-
-## Files API & Large File Handling
-
-The server automatically handles file size:
-
-- **<= 20MB**: Sent inline as base64 (fast, no upload step)
-- **> 20MB up to 2GB**: Uploaded via Gemini Files API, then referenced by URI
-- **YouTube URLs**: Passed directly via `fileData.fileUri` (no download)
-- **HTTP/HTTPS URLs**: Passed via `createPartFromUri` (up to 100MB)
-- **GCS URIs** (`gs://`): Passed via `fileData.fileUri`
-
-Uploaded files are retained for 48 hours. Use `gemini_list_files` and `gemini_delete_file` to manage them.
-
-## Deep Research
-
-The `gemini_deep_research` tool uses Gemini's Interactions API with the `deep-research-pro-preview-12-2025` agent:
-
-1. Starts research in background mode
-2. Polls for 50 seconds in case it finishes quickly
-3. If still running, starts background polling (every 30s, up to 30 minutes)
-4. Sends a **push notification** via `termux-notification` when complete
-5. Saves full results to `~/.cache/deep_research_*.txt`
-
-Use `gemini_check_research` to manually poll at any time.
-
-## Project Structure
-
-```
-gemini-mcp-server/
-  index.js              # Server entry point
-  tools/
-    shared.js           # Shared config, AI client, extractText helper
-    chat.js             # 17 tools: chat, analysis, research, files, YouTube
-    utility.js          # 6 tools: models, tokens, embed, code, summarize, translate
-  package.json
+```bash
+claude mcp add gemini --scope user -e GEMINI_API_KEY=your-api-key -- node /absolute/path/to/gemini-mcp-server/index.js
 ```
 
-## Security
+## Configuration
 
-- **API key from environment only** -- never hardcoded in source
-- **File paths validated** -- absolute paths required, existence checked before reading
-- **Stdio transport** -- no network server exposed
-- **No data logged or stored** -- prompts and responses are not persisted
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | (required) | Gemini API key. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Model for video, audio, image and document analysis. `gemini-4-argon` for the most demanding questions. |
+| `GEMINI_TRANSCRIBE_MODEL` | `gemini-3.5-transcribe` | Model for `gemini_transcribe_audio`. |
+| `GEMINI_THINKING_LEVEL` | `low` | `low`, `medium` or `high`. Each call can override it with `thinkingLevel`. |
+| `GEMINI_MEDIA_RESOLUTION` | `medium` | `low`, `medium`, `high` or `ultra_high` tokens per image or video frame. Each call can override it with `resolution`. |
+| `GEMINI_STORE` | `false` | Whether Google stores requests in the AI Studio logs of the API key's project. |
+| `GEMINI_KEEP_UPLOADS` | `false` | Keep files uploaded on the client's behalf for 48 hours instead of deleting them after the call. |
+| `GEMINI_INLINE_MAX_MB` | `20` | Largest file sent inline; larger files go through the Files API. |
+| `GEMINI_TIMEOUT_MS` | `900000` | Maximum time for a single request, including uploads. |
 
-## Dependencies
+Model IDs change as Google releases and retires models; the [Gemini API release notes](https://ai.google.dev/gemini-api/docs/changelog) list the current ones.
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `@modelcontextprotocol/sdk` | ^1.0.0 | MCP server framework |
-| `@google/genai` | ^1.0.0 | Google Gemini AI SDK |
-| `zod` | ^3.24.0 | Input schema validation |
+## Behavior notes
+
+- Responses stream from the Interactions API, which keeps long video analyses alive without server-side storage.
+- During long calls the server sends MCP progress notifications every 10 seconds.
+- Each response ends with the model used and its token counts.
+- Uploaded files count toward the Files API quota and expire after 48 hours.
+
+## Development
+
+```bash
+npm test
+```
+
+The test suite starts the server over stdio against a local mock of the Gemini API and checks the requests it sends. It needs no API key.
 
 ## License
 
