@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,8 @@ before(async () => {
   await writeFile(join(dir, 'photo.png'), Buffer.alloc(512, 4));
   await writeFile(join(dir, 'report.pdf'), Buffer.alloc(512, 5));
   await writeFile(join(dir, 'clip.mkv'), Buffer.alloc(512, 6));
+  await writeFile(join(dir, 'song.ogg'), Buffer.alloc(512, 7));
+  await writeFile(join(dir, 'big.pdf'), Buffer.alloc(2 * 1024 * 1024, 8));
 
   client = new Client({ name: 'test-client', version: '1.0.0' });
   await client.connect(
@@ -44,6 +46,7 @@ before(async () => {
         GEMINI_BASE_URL: mock.url,
         GEMINI_INLINE_MAX_MB: '1',
         GEMINI_PROGRESS_INTERVAL_MS: '200',
+        GEMINI_RESEARCH_POLL_MS: '50',
       },
       stderr: 'inherit',
     }),
@@ -56,15 +59,21 @@ after(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
-test('exposes only the perception and file tools', async () => {
+test('exposes the expected tools', async () => {
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     'gemini_analyze_audio',
     'gemini_analyze_document',
     'gemini_analyze_image',
     'gemini_analyze_video',
+    'gemini_chat',
+    'gemini_check_research',
+    'gemini_count_tokens',
+    'gemini_deep_research',
     'gemini_delete_file',
+    'gemini_embed',
     'gemini_list_files',
+    'gemini_list_models',
     'gemini_transcribe_audio',
     'gemini_upload_file',
   ]);
@@ -292,4 +301,121 @@ test('long calls send progress notifications', async () => {
   assert.equal(result.isError, undefined, textOf(result));
   assert.ok(progress.length >= 3, `expected heartbeats, got ${progress.length}`);
   assert.match(progress[0].message, /Gemini is watching the video \(\d+s elapsed\)/);
+});
+
+function lastRequest(pattern) {
+  return mock.requests.filter((r) => pattern.test(r.path)).at(-1);
+}
+
+test('chat: prompt, context file and system instruction', async () => {
+  const result = await client.callTool({
+    name: 'gemini_chat',
+    arguments: {
+      prompt: 'Review this',
+      sources: [join(dir, 'report.pdf')],
+      systemInstruction: 'Be blunt',
+      thinkingLevel: 'medium',
+    },
+  });
+  assert.equal(result.isError, undefined, textOf(result));
+  assert.match(textOf(result), /A cat jumps/);
+  const req = lastInteraction();
+  assert.equal(req.body.system_instruction, 'Be blunt');
+  assert.equal(req.body.store, false);
+  assert.deepEqual(req.body.generation_config, { thinking_level: 'medium' });
+  assert.equal(req.body.input[0].type, 'document');
+  assert.deepEqual(req.body.input[1], { type: 'text', text: 'Review this' });
+});
+
+test('list models with filter', async () => {
+  const result = await client.callTool({ name: 'gemini_list_models', arguments: { filter: 'embedding' } });
+  const text = textOf(result);
+  assert.match(text, /gemini-embedding-2 \(Gemini Embedding 2\)/);
+  assert.doesNotMatch(text, /gemini-3\.8-flash/);
+});
+
+test('count tokens for a file and prompt', async () => {
+  const result = await client.callTool({
+    name: 'gemini_count_tokens',
+    arguments: { prompt: 'Summarize', sources: [join(dir, 'small.mp4')] },
+  });
+  assert.equal(result.isError, undefined, textOf(result));
+  assert.match(textOf(result), /Input tokens \(model: gemini-3\.8-flash\): 4321/);
+  const req = lastRequest(/:countTokens$/);
+  assert.match(req.path, /models\/gemini-3\.8-flash:countTokens$/);
+  const parts = req.body.contents[0].parts;
+  assert.equal(parts[0].inlineData.mimeType, 'video/mp4');
+  assert.deepEqual(parts[1], { text: 'Summarize' });
+});
+
+test('embed: separate vectors saved to a file', async () => {
+  const outputPath = join(dir, 'out', 'vectors.json');
+  const result = await client.callTool({
+    name: 'gemini_embed',
+    arguments: { texts: ['a dog'], sources: [join(dir, 'photo.png')], dimensions: 768, outputPath },
+  });
+  assert.equal(result.isError, undefined, textOf(result));
+  assert.match(textOf(result), /2 embedding\(s\), 768 dimensions \(model: gemini-embedding-2\)/);
+  const saved = JSON.parse(await readFile(outputPath, 'utf8'));
+  assert.equal(saved.items.length, 2);
+  assert.equal(saved.items[0].values.length, 768);
+  assert.equal(saved.items[1].input, join(dir, 'photo.png'));
+  const req = lastRequest(/:(batchEmbedContents|embedContent)$/);
+  assert.match(req.path, /gemini-embedding-2/);
+});
+
+test('embed: aggregate returns one vector, unsupported format rejected', async () => {
+  const agg = await client.callTool({
+    name: 'gemini_embed',
+    arguments: { texts: ['a dog'], sources: [join(dir, 'photo.png')], mode: 'aggregate' },
+  });
+  assert.equal(agg.isError, undefined, textOf(agg));
+  assert.match(textOf(agg), /^1 embedding\(s\)/);
+
+  const bad = await client.callTool({
+    name: 'gemini_embed',
+    arguments: { sources: [join(dir, 'song.ogg')] },
+  });
+  assert.equal(bad.isError, true);
+  assert.match(textOf(bad), /not a format gemini-embedding-2 accepts/);
+});
+
+test('deep research: start, then collect the cited report', async () => {
+  const start = await client.callTool({
+    name: 'gemini_deep_research',
+    arguments: { query: 'History of TPUs', documents: [join(dir, 'big.pdf')], waitSeconds: 0 },
+  });
+  assert.equal(start.isError, undefined, textOf(start));
+  assert.match(textOf(start), /Interaction ID: res_1/);
+
+  const req = mock.requests.filter((r) => r.path.endsWith('/interactions') && r.body?.agent).at(-1);
+  assert.equal(req.body.agent, 'deep-research-preview-04-2026');
+  assert.equal(req.body.background, true);
+  assert.equal(req.body.store, true);
+  assert.equal(req.body.agent_config.type, 'deep-research');
+  assert.equal(req.body.input[0].type, 'document');
+  const uploaded = req.body.input[0].uri.match(/(files\/mock\d+)$/)[1];
+  assert.ok(mock.files.has(uploaded), 'research documents must not be deleted while research runs');
+  assert.deepEqual(req.body.input[1], { type: 'text', text: 'History of TPUs' });
+
+  const reportPath = join(dir, 'report.md');
+  const done = await client.callTool({
+    name: 'gemini_check_research',
+    arguments: { interactionId: 'res_1', waitMinutes: 1, outputPath: reportPath },
+  });
+  assert.equal(done.isError, undefined, textOf(done));
+  const text = textOf(done);
+  assert.match(text, /Google announced the first TPU in 2016\./);
+  assert.match(text, /## Sources\n- \[TPU paper\]\(https:\/\/example\.com\/tpu\)/);
+  assert.equal((text.match(/example\.com\/tpu/g) || []).length, 1);
+  assert.match(await readFile(reportPath, 'utf8'), /# TPU history/);
+});
+
+test('deep research: max depth uses the max agent', async () => {
+  await client.callTool({
+    name: 'gemini_deep_research',
+    arguments: { query: 'x', depth: 'max', waitSeconds: 0 },
+  });
+  const req = mock.requests.filter((r) => r.path.endsWith('/interactions') && r.body?.agent).at(-1);
+  assert.equal(req.body.agent, 'deep-research-max-preview-04-2026');
 });

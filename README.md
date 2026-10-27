@@ -1,6 +1,6 @@
 # Gemini MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, or any MCP client, the ability to watch video, listen to audio and read documents through the Gemini API. The client sends a file or URL and a question; Gemini processes the media and returns text the client can keep working with.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, or any MCP client, the ability to watch video, listen to audio and read documents through the Gemini API. The client sends a file or URL and a question; Gemini processes the media and returns text the client can keep working with. It also exposes Gemini capabilities an MCP client does not have on its own: Deep Research reports, multimodal embeddings, Gemini token counts and an independent second opinion.
 
 Built on the [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK and the Gemini Interactions API. Fork of [salviz/gemini-mcp-server](https://github.com/salviz/gemini-mcp-server).
 
@@ -13,6 +13,12 @@ Built on the [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK 
 | `gemini_transcribe_audio` | Transcript from the dedicated transcription model, with speaker labels and `MM:SS` timestamps. |
 | `gemini_analyze_image` | Ask about an image, up to `ultra_high` resolution for dense text and small details. |
 | `gemini_analyze_document` | Ask about a PDF or CSV, including scanned pages and figures. |
+| `gemini_deep_research` | Start a Deep Research task: an agent that searches the web and writes a cited report. Optional PDFs or images as extra sources. |
+| `gemini_check_research` | Collect a Deep Research report, waiting up to 30 minutes per call. |
+| `gemini_embed` | Embeddings with `gemini-embedding-2` for text, images, audio, video and PDFs in one vector space. |
+| `gemini_count_tokens` | Count input tokens for a prompt and files, to estimate cost before a large analysis. |
+| `gemini_list_models` | List the Gemini models available to the API key. |
+| `gemini_chat` | Ask a Gemini model directly, for a second opinion or review, with optional files as context. |
 | `gemini_upload_file` | Upload a file once and reuse its `files/...` name across several questions. |
 | `gemini_list_files` | List files stored in the Files API. |
 | `gemini_delete_file` | Delete a file from the Files API. |
@@ -35,6 +41,14 @@ Supported formats: MP4, MPEG, MOV, AVI, FLV, WebM, WMV and 3GP for video; WAV, M
 ### Transcription
 
 `gemini_transcribe_audio` labels speakers and adds timestamps by default. With either option enabled, audio is limited to 30 minutes; with both disabled, the limit is 1 hour. `customVocabulary` and `smart` mode require both options disabled.
+
+### Deep Research
+
+Deep Research takes several minutes. `gemini_deep_research` waits up to `waitSeconds` (60 by default) and returns the report if it is ready; otherwise it returns an interaction ID, and `gemini_check_research` collects the report. Both tools accept `outputPath` to save the report as Markdown. `depth: "max"` uses the more thorough agent. Deep Research runs in the background on Google's side, which stores the interaction there whatever `GEMINI_STORE` says. Documents passed to it stay in the Files API for 48 hours.
+
+### Embeddings
+
+`gemini_embed` returns one vector per item by default, or a single vector for all items with `mode: "aggregate"`. Limits per request: 8,192 tokens, 6 images (PNG, JPEG), 180 seconds of audio (MP3, WAV), 120 seconds of video (MP4, MOV) and one PDF of up to 6 pages. Dimensions range from 128 to 3072 (default 3072). The response shows a preview; `outputPath` saves the full vectors as JSON.
 
 ## Requirements
 
@@ -90,6 +104,9 @@ claude mcp add gemini --scope user -e GEMINI_API_KEY=your-api-key -- node /absol
 | `GEMINI_API_KEY` | (required) | Gemini API key. |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model for video, audio, image and document analysis. `gemini-4-argon` for the most demanding questions. |
 | `GEMINI_TRANSCRIBE_MODEL` | `gemini-3.5-transcribe` | Model for `gemini_transcribe_audio`. |
+| `GEMINI_EMBEDDING_MODEL` | `gemini-embedding-2` | Model for `gemini_embed`. |
+| `GEMINI_RESEARCH_AGENT` | `deep-research-preview-04-2026` | Deep Research agent for `depth: "standard"`. |
+| `GEMINI_RESEARCH_MAX_AGENT` | `deep-research-max-preview-04-2026` | Deep Research agent for `depth: "max"`. |
 | `GEMINI_THINKING_LEVEL` | `low` | `low`, `medium` or `high`. Each call can override it with `thinkingLevel`. |
 | `GEMINI_MEDIA_RESOLUTION` | `medium` | `low`, `medium`, `high` or `ultra_high` tokens per image or video frame. Each call can override it with `resolution`. |
 | `GEMINI_STORE` | `false` | Whether Google stores requests in the AI Studio logs of the API key's project. |

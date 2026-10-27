@@ -78,6 +78,7 @@ function interactionEvents(body) {
 export async function startMockGemini() {
   const requests = [];
   const files = new Map();
+  const research = new Map();
   let counter = 0;
 
   const server = createServer(async (req, res) => {
@@ -97,6 +98,79 @@ export async function startMockGemini() {
     requests.push({ method: req.method, path: url.pathname, headers: req.headers, body, bytes: raw.length });
 
     const port = server.address().port;
+
+    if (req.method === 'POST' && /\/v1beta\/interactions$/.test(url.pathname) && body?.agent) {
+      research.set('res_1', { polls: 0 });
+      return json(res, 200, { id: 'res_1', status: 'in_progress', agent: body.agent });
+    }
+
+    const researchMatch = url.pathname.match(/^\/v1beta\/interactions\/([\w-]+)$/);
+    if (researchMatch && req.method === 'GET') {
+      const state = research.get(researchMatch[1]);
+      if (!state) return json(res, 404, { error: { code: 404, message: 'not found' } });
+      state.polls += 1;
+      if (state.polls < 3) return json(res, 200, { id: researchMatch[1], status: 'in_progress' });
+      return json(res, 200, {
+        id: researchMatch[1],
+        status: 'completed',
+        steps: [
+          { type: 'user_input', content: [{ type: 'text', text: 'question' }] },
+          { type: 'thought', summary: [] },
+          {
+            type: 'model_output',
+            content: [
+              {
+                type: 'text',
+                text: '# TPU history\n\nGoogle announced the first TPU in 2016.',
+                annotations: [
+                  { type: 'url_citation', url: 'https://example.com/tpu', title: 'TPU paper' },
+                  { type: 'url_citation', url: 'https://example.com/tpu', title: 'TPU paper' },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1beta/models') {
+      return json(res, 200, {
+        models: [
+          {
+            name: 'models/gemini-3.8-flash',
+            displayName: 'Gemini 3.8 Flash',
+            inputTokenLimit: 1048576,
+            outputTokenLimit: 65536,
+            supportedActions: ['generateContent', 'countTokens'],
+          },
+          {
+            name: 'models/gemini-embedding-2',
+            displayName: 'Gemini Embedding 2',
+            inputTokenLimit: 8192,
+            outputTokenLimit: 1,
+            supportedActions: ['embedContent'],
+          },
+        ],
+      });
+    }
+
+    if (req.method === 'POST' && /:countTokens$/.test(url.pathname)) {
+      return json(res, 200, { totalTokens: 4321 });
+    }
+
+    if (req.method === 'POST' && /:batchEmbedContents$/.test(url.pathname)) {
+      const n = body?.requests?.length || 1;
+      const dims = body?.requests?.[0]?.outputDimensionality || 3072;
+      return json(res, 200, {
+        embeddings: Array.from({ length: n }, (_, i) => ({
+          values: Array.from({ length: dims }, (_, j) => (i + 1) / (j + 1)),
+        })),
+      });
+    }
+    if (req.method === 'POST' && /:embedContent$/.test(url.pathname)) {
+      const dims = body?.outputDimensionality || 3072;
+      return json(res, 200, { embedding: { values: Array.from({ length: dims }, (_, j) => 1 / (j + 1)) } });
+    }
 
     if (req.method === 'POST' && /\/v1beta\/interactions$/.test(url.pathname)) {
       const slow = JSON.stringify(body?.input || []).includes('SLOW');
