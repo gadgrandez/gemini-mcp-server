@@ -3,7 +3,7 @@ import { config, THINKING_LEVELS, MEDIA_RESOLUTIONS } from '../lib/config.js';
 import { resolveSource } from '../lib/sources.js';
 import { runInteraction, usageLine } from '../lib/run.js';
 import { formatWordTranscript, parseOffset } from '../lib/format.js';
-import { success, failure, withHeartbeat } from './result.js';
+import { success, failure, withDeadline } from './result.js';
 
 const SOURCE_DESCRIPTION = 'Absolute local file path, Files API name (files/...), https:// URL or gs:// URI';
 
@@ -132,7 +132,7 @@ export function registerMediaTools(server) {
       },
       extra,
     ) =>
-      withHeartbeat(extra, 'Gemini is watching the video', async () => {
+      withDeadline(extra, 'Gemini is watching the video', async () => {
         try {
           const start = toDuration(startOffset);
           const end = toDuration(endOffset);
@@ -191,7 +191,7 @@ export function registerMediaTools(server) {
       annotations: READ_ONLY,
     },
     async ({ source, prompt, model, thinkingLevel, mimeType }, extra) =>
-      withHeartbeat(extra, 'Gemini is listening to the audio', async () => {
+      withDeadline(extra, 'Gemini is listening to the audio', async () => {
         try {
           return await analyze({ kind: 'audio', source, prompt, model, thinkingLevel, mimeType });
         } catch (e) {
@@ -237,7 +237,7 @@ export function registerMediaTools(server) {
       { source, languageCodes, speakers, wordTimestamps, mode, customVocabulary, model, mimeType },
       extra,
     ) =>
-      withHeartbeat(extra, 'Gemini is transcribing the audio', async () => {
+      withDeadline(extra, 'Gemini is transcribing the audio', async () => {
         try {
           const hasVocabulary = customVocabulary?.length > 0;
           if ((mode === 'smart' || hasVocabulary) && (speakers || wordTimestamps)) {
@@ -296,7 +296,7 @@ export function registerMediaTools(server) {
       annotations: READ_ONLY,
     },
     async ({ source, prompt, resolution: res, model, thinkingLevel, mimeType }, extra) =>
-      withHeartbeat(extra, 'Gemini is inspecting the image', async () => {
+      withDeadline(extra, 'Gemini is inspecting the image', async () => {
         try {
           return await analyze({
             kind: 'image',
@@ -331,7 +331,7 @@ export function registerMediaTools(server) {
       annotations: READ_ONLY,
     },
     async ({ source, prompt, model, thinkingLevel, mimeType }, extra) =>
-      withHeartbeat(extra, 'Gemini is reading the document', async () => {
+      withDeadline(extra, 'Gemini is reading the document', async () => {
         try {
           return await analyze({ kind: 'document', source, prompt, model, thinkingLevel, mimeType });
         } catch (e) {

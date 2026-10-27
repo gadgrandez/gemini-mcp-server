@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ai, config, THINKING_LEVELS } from '../lib/config.js';
 import { kindOf, resolveSource, toPart } from '../lib/sources.js';
 import { runInteraction, usageLine } from '../lib/run.js';
-import { success, failure, withHeartbeat } from './result.js';
+import { success, failure, withDeadline } from './result.js';
 
 const SOURCES_DESCRIPTION =
   'Absolute local paths, Files API names (files/...), https:// URLs or gs:// URIs; the kind ' +
@@ -73,7 +73,7 @@ export function registerGeminiTools(server) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     async ({ prompt, sources, systemInstruction, model, thinkingLevel }, extra) =>
-      withHeartbeat(extra, 'Waiting for Gemini', async () => {
+      withDeadline(extra, 'Waiting for Gemini', async () => {
         let resolved = [];
         try {
           resolved = await resolveMany(sources || []);
@@ -151,7 +151,7 @@ export function registerGeminiTools(server) {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     async ({ prompt, sources, model }, extra) =>
-      withHeartbeat(extra, 'Counting tokens', async () => {
+      withDeadline(extra, 'Counting tokens', async () => {
         let resolved = [];
         try {
           if (!prompt && !sources?.length) throw new Error('Provide a prompt, sources, or both');
@@ -208,7 +208,7 @@ export function registerGeminiTools(server) {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async ({ texts, sources, mode, dimensions, outputPath, model }, extra) =>
-      withHeartbeat(extra, 'Creating embeddings', async () => {
+      withDeadline(extra, 'Creating embeddings', async () => {
         const resolved = [];
         try {
           const textItems = texts || [];

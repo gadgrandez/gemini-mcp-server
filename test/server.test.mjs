@@ -12,11 +12,21 @@ const serverPath = fileURLToPath(new URL('../index.js', import.meta.url));
 
 let mock;
 let client;
+let shortClient;
 let dir;
 
 function lastInteraction() {
   const hits = mock.requests.filter((r) => r.path.endsWith('/interactions'));
   return hits.at(-1);
+}
+
+// Polls gemini_job_status the way a client would until the job stops reporting progress.
+async function collectJob(c, jobId) {
+  for (let i = 0; i < 20; i++) {
+    const r = await c.callTool({ name: 'gemini_job_status', arguments: { jobId } });
+    if (!/^Still running after/.test(textOf(r))) return r;
+  }
+  throw new Error(`Job ${jobId} did not finish`);
 }
 
 function textOf(result) {
@@ -35,8 +45,14 @@ before(async () => {
   await writeFile(join(dir, 'song.ogg'), Buffer.alloc(512, 7));
   await writeFile(join(dir, 'big.pdf'), Buffer.alloc(2 * 1024 * 1024, 8));
 
-  client = new Client({ name: 'test-client', version: '1.0.0' });
-  await client.connect(
+  client = await connectClient({});
+  // A one-second call window exercises the background job path.
+  shortClient = await connectClient({ GEMINI_SYNC_WAIT_SECONDS: '1' });
+});
+
+async function connectClient(extraEnv) {
+  const c = new Client({ name: 'test-client', version: '1.0.0' });
+  await c.connect(
     new StdioClientTransport({
       command: process.execPath,
       args: [serverPath],
@@ -47,14 +63,17 @@ before(async () => {
         GEMINI_INLINE_MAX_MB: '1',
         GEMINI_PROGRESS_INTERVAL_MS: '200',
         GEMINI_RESEARCH_POLL_MS: '50',
+        ...extraEnv,
       },
       stderr: 'inherit',
     }),
   );
-});
+  return c;
+}
 
 after(async () => {
   await client?.close();
+  await shortClient?.close();
   await mock?.close();
   if (dir) await rm(dir, { recursive: true, force: true });
 });
@@ -72,6 +91,7 @@ test('exposes the expected tools', async () => {
     'gemini_deep_research',
     'gemini_delete_file',
     'gemini_embed',
+    'gemini_job_status',
     'gemini_list_files',
     'gemini_list_models',
     'gemini_transcribe_audio',
@@ -381,12 +401,15 @@ test('embed: aggregate returns one vector, unsupported format rejected', async (
 });
 
 test('deep research: start, then collect the cited report', async () => {
-  const start = await client.callTool({
+  const start = await shortClient.callTool({
     name: 'gemini_deep_research',
-    arguments: { query: 'History of TPUs', documents: [join(dir, 'big.pdf')], waitSeconds: 0 },
+    arguments: { query: 'History of TPUs', documents: [join(dir, 'big.pdf')] },
   });
   assert.equal(start.isError, undefined, textOf(start));
-  assert.match(textOf(start), /Interaction ID: res_1/);
+  // The document upload outlasts the one-second window, so the start itself becomes a job.
+  const jobId = textOf(start).match(/Job ID: (job_\w+)/)[1];
+  const started = await collectJob(shortClient, jobId);
+  assert.match(textOf(started), /Interaction ID: res_1/);
 
   const req = mock.requests.filter((r) => r.path.endsWith('/interactions') && r.body?.agent).at(-1);
   assert.equal(req.body.agent, 'deep-research-preview-04-2026');
@@ -401,7 +424,7 @@ test('deep research: start, then collect the cited report', async () => {
   const reportPath = join(dir, 'report.md');
   const done = await client.callTool({
     name: 'gemini_check_research',
-    arguments: { interactionId: 'res_1', waitMinutes: 1, outputPath: reportPath },
+    arguments: { interactionId: 'res_1', waitSeconds: 30, outputPath: reportPath },
   });
   assert.equal(done.isError, undefined, textOf(done));
   const text = textOf(done);
@@ -414,8 +437,42 @@ test('deep research: start, then collect the cited report', async () => {
 test('deep research: max depth uses the max agent', async () => {
   await client.callTool({
     name: 'gemini_deep_research',
-    arguments: { query: 'x', depth: 'max', waitSeconds: 0 },
+    arguments: { query: 'x', depth: 'max' },
   });
   const req = mock.requests.filter((r) => r.path.endsWith('/interactions') && r.body?.agent).at(-1);
   assert.equal(req.body.agent, 'deep-research-max-preview-04-2026');
+});
+
+test('long calls return a job ID and the result arrives through gemini_job_status', async () => {
+  const first = await shortClient.callTool({
+    name: 'gemini_analyze_video',
+    arguments: { source: join(dir, 'small.mp4'), prompt: 'SLOW' },
+  });
+  assert.equal(first.isError, undefined, textOf(first));
+  const text = textOf(first);
+  assert.match(text, /Still running after \d+s: Gemini is watching the video\./);
+  const jobId = text.match(/Job ID: (job_\w+)/)[1];
+
+  const done = await shortClient.callTool({
+    name: 'gemini_job_status',
+    arguments: { jobId, waitSeconds: 10 },
+  });
+  assert.equal(done.isError, undefined, textOf(done));
+  assert.match(textOf(done), /A cat jumps onto a table at 00:12\./);
+
+  const again = await shortClient.callTool({ name: 'gemini_job_status', arguments: { jobId } });
+  assert.match(textOf(again), /A cat jumps/);
+
+  const unknown = await shortClient.callTool({ name: 'gemini_job_status', arguments: { jobId: 'job_nope' } });
+  assert.equal(unknown.isError, true);
+  assert.match(textOf(unknown), /Unknown job job_nope/);
+});
+
+test('job errors surface through gemini_job_status', async () => {
+  const first = await shortClient.callTool({
+    name: 'gemini_analyze_video',
+    arguments: { source: join(dir, 'clip.mkv') },
+  });
+  assert.equal(first.isError, true);
+  assert.match(textOf(first), /Supported extensions/);
 });

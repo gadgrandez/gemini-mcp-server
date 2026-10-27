@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 import { ai, config } from '../lib/config.js';
 import { kindOf, resolveSource } from '../lib/sources.js';
-import { success, failure, withHeartbeat } from './result.js';
+import { success, failure, withDeadline, withHeartbeat } from './result.js';
 
 const POLL_MS = Number.parseInt(process.env.GEMINI_RESEARCH_POLL_MS || '', 10) || 10_000;
 const DONE = new Set(['completed', 'incomplete']);
@@ -58,7 +58,7 @@ function pending(interaction) {
   return success(
     `Deep research is still running (status: ${interaction.status}).\n` +
       `Interaction ID: ${interaction.id}\n\n` +
-      'Call gemini_check_research with this ID and waitMinutes to collect the report.',
+      'Call gemini_check_research with this ID until the report is ready.',
   );
 }
 
@@ -74,9 +74,9 @@ export function registerResearchTools(server) {
       title: 'Start Gemini Deep Research',
       description:
         'Start a Gemini Deep Research task: an agent that plans, runs many Google searches, reads ' +
-        'sources and writes a cited report. It takes several minutes. This tool waits up to ' +
-        'waitSeconds and returns the report if it finishes; otherwise it returns an interaction ID ' +
-        'for gemini_check_research. Deep Research runs in the background on Google, which requires ' +
+        'sources and writes a cited report. It takes several minutes, so this tool usually returns an ' +
+        'interaction ID; collect the report with gemini_check_research. Deep Research runs in the ' +
+        'background on Google, which requires ' +
         'storing the interaction there regardless of GEMINI_STORE.',
       inputSchema: {
         query: z
@@ -92,19 +92,12 @@ export function registerResearchTools(server) {
           .describe(
             'PDFs or images to research alongside the web: absolute local paths, files/... names, https:// URLs or gs:// URIs',
           ),
-        waitSeconds: z
-          .number()
-          .int()
-          .min(0)
-          .max(600)
-          .default(60)
-          .describe('How long to wait for the report before returning the interaction ID'),
         outputPath: z.string().optional().describe('Absolute path of a Markdown file to save the report to'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async ({ query, depth, documents, waitSeconds, outputPath }, extra) =>
-      withHeartbeat(extra, 'Gemini Deep Research is running', async () => {
+    async ({ query, depth, documents, outputPath }, extra) =>
+      withDeadline(extra, 'Gemini Deep Research is running', async () => {
         try {
           const input = [];
           for (const source of documents || []) {
@@ -132,7 +125,9 @@ export function registerResearchTools(server) {
           });
           if (!created?.id) throw new Error('Deep research started without an interaction ID');
 
-          const interaction = await pollUntil(created.id, Date.now() + waitSeconds * 1000);
+          // Short reports can finish quickly; otherwise hand back the ID within the call window.
+          const window = config.syncWaitMs > 0 ? Math.max(0, config.syncWaitMs - 5000) : 60_000;
+          const interaction = await pollUntil(created.id, Date.now() + window);
           if (FAILED.has(interaction.status)) failed(interaction);
           if (DONE.has(interaction.status)) return await finish(interaction, outputPath);
           return pending(interaction);
@@ -148,23 +143,29 @@ export function registerResearchTools(server) {
       title: 'Check Gemini Deep Research',
       description:
         'Check a Deep Research task started with gemini_deep_research and return the report when it ' +
-        'is ready. waitMinutes keeps polling up to that long before returning.',
+        'is ready. Call it repeatedly until the report arrives; each call polls for up to waitSeconds.',
       inputSchema: {
         interactionId: z.string().describe('Interaction ID returned by gemini_deep_research'),
-        waitMinutes: z
+        waitSeconds: z
           .number()
+          .int()
           .min(0)
-          .max(30)
-          .default(0)
-          .describe('Minutes to keep waiting (0 = check once)'),
+          .max(600)
+          .default(40)
+          .describe(
+            'Seconds to keep polling before returning; capped by GEMINI_SYNC_WAIT_SECONDS (0 = check once)',
+          ),
         outputPath: z.string().optional().describe('Absolute path of a Markdown file to save the report to'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async ({ interactionId, waitMinutes, outputPath }, extra) =>
+    async ({ interactionId, waitSeconds, outputPath }, extra) =>
       withHeartbeat(extra, 'Waiting for Gemini Deep Research', async () => {
         try {
-          const interaction = await pollUntil(interactionId, Date.now() + waitMinutes * 60_000);
+          const requested = waitSeconds * 1000;
+          const wait =
+            config.syncWaitMs > 0 ? Math.min(requested, Math.max(0, config.syncWaitMs - 2000)) : requested;
+          const interaction = await pollUntil(interactionId, Date.now() + wait);
           if (FAILED.has(interaction.status)) failed(interaction);
           if (DONE.has(interaction.status)) return await finish(interaction, outputPath);
           return pending(interaction);

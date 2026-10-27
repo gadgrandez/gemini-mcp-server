@@ -3,7 +3,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 import { ai } from '../lib/config.js';
 import { guessMime, uploadFile } from '../lib/sources.js';
-import { success, failure, withHeartbeat } from './result.js';
+import { success, failure, withDeadline } from './result.js';
 
 function describeFile(file) {
   return [
@@ -37,7 +37,7 @@ export function registerFileTools(server) {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async ({ filePath, mimeType, displayName }, extra) =>
-      withHeartbeat(extra, 'Uploading to Gemini', async () => {
+      withDeadline(extra, 'Uploading to Gemini', async () => {
         try {
           if (!isAbsolute(filePath)) throw new Error('filePath must be an absolute path');
           const resolved = resolve(filePath);

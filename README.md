@@ -14,12 +14,13 @@ Built on the [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK 
 | `gemini_analyze_image` | Ask about an image, up to `ultra_high` resolution for dense text and small details. |
 | `gemini_analyze_document` | Ask about a PDF or CSV, including scanned pages and figures. |
 | `gemini_deep_research` | Start a Deep Research task: an agent that searches the web and writes a cited report. Optional PDFs or images as extra sources. |
-| `gemini_check_research` | Collect a Deep Research report, waiting up to 30 minutes per call. |
+| `gemini_check_research` | Collect a Deep Research report; call it again until the report is ready. |
 | `gemini_embed` | Embeddings with `gemini-embedding-2` for text, images, audio, video and PDFs in one vector space. |
 | `gemini_count_tokens` | Count input tokens for a prompt and files, to estimate cost before a large analysis. |
 | `gemini_list_models` | List the Gemini models available to the API key. |
 | `gemini_chat` | Ask a Gemini model directly, for a second opinion or review, with optional files as context. |
 | `gemini_upload_file` | Upload a file once and reuse its `files/...` name across several questions. |
+| `gemini_job_status` | Collect the result of a call that returned a job ID because it was still running. |
 | `gemini_list_files` | List files stored in the Files API. |
 | `gemini_delete_file` | Delete a file from the Files API. |
 
@@ -44,7 +45,7 @@ Supported formats: MP4, MPEG, MOV, AVI, FLV, WebM, WMV and 3GP for video; WAV, M
 
 ### Deep Research
 
-Deep Research takes several minutes. `gemini_deep_research` waits up to `waitSeconds` (60 by default) and returns the report if it is ready; otherwise it returns an interaction ID, and `gemini_check_research` collects the report. Both tools accept `outputPath` to save the report as Markdown. `depth: "max"` uses the more thorough agent. Deep Research runs in the background on Google's side, which stores the interaction there whatever `GEMINI_STORE` says. Documents passed to it stay in the Files API for 48 hours.
+Deep Research takes several minutes. `gemini_deep_research` returns the report if it finishes within the call window and an interaction ID otherwise; `gemini_check_research` polls for up to `waitSeconds` per call and returns the report once it is ready. Both tools accept `outputPath` to save the report as Markdown. `depth: "max"` uses the more thorough agent. Deep Research runs in the background on Google's side, which stores the interaction there whatever `GEMINI_STORE` says. Documents passed to it stay in the Files API for 48 hours.
 
 ### Embeddings
 
@@ -112,13 +113,15 @@ claude mcp add gemini --scope user -e GEMINI_API_KEY=your-api-key -- node /absol
 | `GEMINI_STORE` | `false` | Whether Google stores requests in the AI Studio logs of the API key's project. |
 | `GEMINI_KEEP_UPLOADS` | `false` | Keep files uploaded on the client's behalf for 48 hours instead of deleting them after the call. |
 | `GEMINI_INLINE_MAX_MB` | `20` | Largest file sent inline; larger files go through the Files API. |
-| `GEMINI_TIMEOUT_MS` | `900000` | Maximum time for a single request, including uploads. |
+| `GEMINI_TIMEOUT_MS` | `900000` | Maximum time for a single request to Gemini, including uploads. |
+| `GEMINI_SYNC_WAIT_SECONDS` | `45` | Call window: how long a tool call waits before returning a job ID. `0` waits until the work finishes. |
 
 Model IDs change as Google releases and retires models; the [Gemini API release notes](https://ai.google.dev/gemini-api/docs/changelog) list the current ones.
 
 ## Behavior notes
 
 - Responses stream from the Interactions API, which keeps long video analyses alive without server-side storage.
+- Every tool call returns within the call window (45 seconds by default), which keeps it under client and remote-bridge timeouts such as the 60-second limit when a claude.ai session reaches the server through the Claude desktop app. Work that takes longer keeps running in the server process and the call returns a job ID; `gemini_job_status` returns the result. Jobs are kept in memory for an hour after they finish and are lost if the server restarts.
 - During long calls the server sends MCP progress notifications every 10 seconds.
 - Each response ends with the model used and its token counts.
 - Uploaded files count toward the Files API quota and expire after 48 hours.
