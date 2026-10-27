@@ -38,7 +38,7 @@ Supported formats: MP4, MPEG, MOV, AVI, FLV, WebM, WMV and 3GP for video; WAV, M
 
 ## Requirements
 
-- Node.js 20 or later (24 LTS recommended)
+- Node.js 24 LTS or later
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
 
 ## Installation
