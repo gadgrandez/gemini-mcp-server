@@ -1,6 +1,6 @@
 {
   "name": "@gadgrandez/gemini-mcp-server",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "MCP server that lets Claude and other MCP clients watch video, listen to audio, read documents, run Deep Research and create embeddings through the Gemini API",
   "main": "index.js",
   "type": "module",

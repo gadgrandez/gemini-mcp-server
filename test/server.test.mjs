@@ -94,6 +94,7 @@ test('exposes the expected tools', async () => {
     'gemini_job_status',
     'gemini_list_files',
     'gemini_list_models',
+    'gemini_search',
     'gemini_transcribe_audio',
     'gemini_upload_file',
   ]);
@@ -475,4 +476,50 @@ test('job errors surface through gemini_job_status', async () => {
   });
   assert.equal(first.isError, true);
   assert.match(textOf(first), /Supported extensions/);
+});
+
+test('search: Google grounding with sources and suggestions', async () => {
+  const result = await client.callTool({
+    name: 'gemini_search',
+    arguments: { query: 'feriados Perú diciembre 2026' },
+  });
+  assert.equal(result.isError, undefined, textOf(result));
+  const text = textOf(result);
+  assert.match(text, /^El 8 de diciembre es feriado\./);
+  assert.match(text, /Sources:\n- \[gob\.pe\]\(https:\/\/www\.gob\.pe\/feriados\)\n\n/);
+  assert.equal((text.match(/gob\.pe\/feriados/g) || []).length, 1);
+  assert.match(
+    text,
+    /Google Search suggestions:\n- \[feriados peru 2026\]\(https:\/\/www\.google\.com\/search\?q=feriados\+peru\+2026&client=app\)/,
+  );
+  assert.match(text, /searches run: 1/);
+  assert.doesNotMatch(text, /Google Maps sources/);
+
+  const req = lastInteraction();
+  assert.deepEqual(req.body.tools, [{ type: 'google_search' }]);
+  assert.equal(req.body.store, false);
+  assert.deepEqual(req.body.input, [{ type: 'text', text: 'feriados Perú diciembre 2026' }]);
+});
+
+test('search: Maps grounding with coordinates', async () => {
+  const result = await client.callTool({
+    name: 'gemini_search',
+    arguments: { query: 'cafés de especialidad cerca', maps: true, latitude: -12.12, longitude: -77.03 },
+  });
+  assert.equal(result.isError, undefined, textOf(result));
+  assert.match(
+    textOf(result),
+    /Google Maps sources:\n- \[Café Tostado\]\(https:\/\/maps\.google\.com\/\?cid=1\) \(Google Maps\)/,
+  );
+  assert.deepEqual(lastInteraction().body.tools, [
+    { type: 'google_search' },
+    { type: 'google_maps', latitude: -12.12, longitude: -77.03 },
+  ]);
+
+  const bad = await client.callTool({
+    name: 'gemini_search',
+    arguments: { query: 'x', latitude: 1, longitude: 2 },
+  });
+  assert.equal(bad.isError, true);
+  assert.match(textOf(bad), /require maps=true/);
 });

@@ -28,6 +28,55 @@ function interactionEvents(body) {
     },
   };
 
+  if (body.tools?.some((t) => t.type === 'google_search')) {
+    const annotations = [
+      {
+        type: 'url_citation',
+        url: 'https://www.gob.pe/feriados',
+        title: 'gob.pe',
+        start_index: 0,
+        end_index: 10,
+      },
+      { type: 'url_citation', url: 'https://www.gob.pe/feriados', title: 'gob.pe' },
+    ];
+    if (body.tools.some((t) => t.type === 'google_maps')) {
+      annotations.push({
+        type: 'place_citation',
+        name: 'Café Tostado',
+        url: 'https://maps.google.com/?cid=1',
+      });
+    }
+    return [
+      created,
+      {
+        event_type: 'step.start',
+        index: 0,
+        step: { type: 'google_search_call', id: 's1', arguments: { queries: ['feriados peru 2026'] } },
+      },
+      { event_type: 'step.stop', index: 0 },
+      {
+        event_type: 'step.start',
+        index: 1,
+        step: {
+          type: 'google_search_result',
+          call_id: 's1',
+          result: [
+            {
+              search_suggestions:
+                '<div class="chip"><a class="chip" href="https://www.google.com/search?q=feriados+peru+2026&amp;client=app">feriados <b>peru</b> 2026</a></div>',
+            },
+          ],
+        },
+      },
+      { event_type: 'step.stop', index: 1 },
+      { event_type: 'step.start', index: 2, step: { type: 'model_output', content: [] } },
+      { event_type: 'step.delta', index: 2, delta: { type: 'text', text: 'El 8 de diciembre es feriado.' } },
+      { event_type: 'step.delta', index: 2, delta: { type: 'text_annotation_delta', annotations } },
+      { event_type: 'step.stop', index: 2 },
+      completed,
+    ];
+  }
+
   if (String(body.model).includes('transcribe')) {
     return [
       created,

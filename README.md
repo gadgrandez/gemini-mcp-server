@@ -1,6 +1,6 @@
 # Gemini MCP Server
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, or any MCP client, the ability to watch video, listen to audio and read documents through the Gemini API. The client sends a file or URL and a question; Gemini processes the media and returns text the client can keep working with. It also exposes Gemini capabilities an MCP client does not have on its own: Deep Research reports, multimodal embeddings, Gemini token counts and an independent second opinion.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude, or any MCP client, the ability to watch video, listen to audio and read documents through the Gemini API. The client sends a file or URL and a question; Gemini processes the media and returns text the client can keep working with. It also exposes Gemini capabilities an MCP client does not have on its own: Google Search and Google Maps grounding, Deep Research reports, multimodal embeddings, Gemini token counts and an independent second opinion.
 
 Built on the [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK and the Gemini Interactions API. Fork of [salviz/gemini-mcp-server](https://github.com/salviz/gemini-mcp-server).
 
@@ -15,6 +15,7 @@ Built on the [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK 
 | `gemini_analyze_document` | Ask about a PDF or CSV, including scanned pages and figures. |
 | `gemini_deep_research` | Start a Deep Research task: an agent that searches the web and writes a cited report. Optional PDFs or images as extra sources. |
 | `gemini_check_research` | Collect a Deep Research report; call it again until the report is ready. |
+| `gemini_search` | Answer with Google Search grounding, returning sources and Google's search suggestions. `maps: true` adds Google Maps grounding for places. |
 | `gemini_embed` | Embeddings with `gemini-embedding-2` for text, images, audio, video and PDFs in one vector space. |
 | `gemini_count_tokens` | Count input tokens for a prompt and files, to estimate cost before a large analysis. |
 | `gemini_list_models` | List the Gemini models available to the API key. |
@@ -46,6 +47,10 @@ Supported formats: MP4, MPEG, MOV, AVI, FLV, WebM, WMV and 3GP for video; WAV, M
 ### Deep Research
 
 Deep Research takes several minutes. `gemini_deep_research` returns the report if it finishes within the call window and an interaction ID otherwise; `gemini_check_research` polls for up to `waitSeconds` per call and returns the report once it is ready. Both tools accept `outputPath` to save the report as Markdown. `depth: "max"` uses the more thorough agent. Deep Research runs in the background on Google's side, which stores the interaction there whatever `GEMINI_STORE` says. Documents passed to it stay in the Files API for 48 hours.
+
+### Google Search
+
+`gemini_search` returns Gemini's grounded answer followed by its sources, any Google Maps sources and Google's search suggestions as links. Google's terms for grounded results require showing them to the user together with their search suggestions and without modifying the grounded answer. With Gemini 3 and newer models, the first 5,000 search queries per month are free, shared across those models; after that, each query costs $14 per 1,000. One call can run several queries, and the response reports how many it ran.
 
 ### Embeddings
 
